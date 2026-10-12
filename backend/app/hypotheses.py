@@ -435,6 +435,10 @@ def set_status(hypothesis_id: int, status: str, reason: str | None) -> None:
             raise InvalidRequest("この状態の変更には理由が必要です")
         if reason and reason == h["status_reason"] and (status in REASON_REQUIRED or current in REASON_REQUIRED):
             raise InvalidRequest("前回と同じ理由です。今回の変更の理由を記入してください")
+        if status == "rejected":
+            from .opportunities import is_selected  # 循環 import を避ける
+            if is_selected(conn, hypothesis_id):
+                raise Conflict("優先調査候補に選定中の仮説は棄却できません。先に /opportunities で選定を外してください")
         if status == "validated":
             progress = validation_progress(conn, hypothesis_id)
             if not progress["requirements_met"]:

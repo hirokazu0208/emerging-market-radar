@@ -13,6 +13,7 @@ from . import db
 from .classifier import CATEGORIES, classify
 from .labels import TAXONOMIES
 from . import hypotheses as hyp
+from . import opportunities as opp
 from . import problems as problem_stats
 from .sources import SOURCES
 
@@ -226,6 +227,123 @@ def retract_hypothesis_evidence(hypothesis_id: int, evidence_id: int, body: Retr
 def hypothesis_rules():
     """仮説を作るルールの一覧と、仮説を作らない経営課題とその理由。"""
     return hyp.rules_overview()
+
+
+# --- SaaS事業機会の比較・選定・検証計画 ------------------------------------------------
+
+class AssessmentCreate(BaseModel):
+    aspect: str
+    state: str
+    basis: str
+    observed_facts: str | None = None
+    relevance: str | None = None
+    judgement_reason: str | None = None
+    assumption_note: str | None = None
+    evidence_ids: list[int] = []
+    activity_ids: list[int] = []
+
+
+class ActivityCreate(BaseModel):
+    activity_type: str
+    purpose: str
+    target: str
+    decision_criteria: str
+    planned_on: str | None = None
+
+
+class ActivityRevision(BaseModel):
+    purpose: str
+    target: str
+    decision_criteria: str
+    planned_on: str | None = None
+    change_reason: str
+
+
+class SourceCreate(BaseModel):
+    url: str
+    accessed_on: str
+    title: str | None = None
+    note: str | None = None
+
+
+class ActivityComplete(BaseModel):
+    outcome: str
+    observed_facts: str
+    interpretation: str
+    judgement_reason: str
+    evidence_ids: list[int] = []
+
+
+class ReasonBody(BaseModel):
+    reason: str
+
+
+@app.get("/api/opportunity-aspects")
+def opportunity_aspects():
+    """6観点の定義、状態の意味、支払意思の種類、事後評価の区別。"""
+    return opp.aspects_overview()
+
+
+@app.get("/api/opportunities")
+def list_opportunities(domain: str | None = None):
+    """13仮説の比較表。点数・順位は返さない。"""
+    return _hyp_call(opp.list_opportunities, domain or None)
+
+
+@app.get("/api/opportunities/{hypothesis_id}")
+def get_opportunity(hypothesis_id: int):
+    return _hyp_call(opp.get_opportunity, hypothesis_id)
+
+
+@app.post("/api/opportunities/{hypothesis_id}/assessments", status_code=201)
+def add_assessment(hypothesis_id: int, body: AssessmentCreate):
+    return {"id": _hyp_call(opp.add_assessment, hypothesis_id, body.model_dump())}
+
+
+@app.post("/api/opportunities/{hypothesis_id}/activities", status_code=201)
+def create_activity(hypothesis_id: int, body: ActivityCreate):
+    return {"id": _hyp_call(opp.create_activity, hypothesis_id, body.model_dump())}
+
+
+@app.post("/api/activities/{activity_id}/revisions")
+def revise_activity(activity_id: int, body: ActivityRevision):
+    _hyp_call(opp.revise_activity, activity_id, body.model_dump())
+    return {"ok": True}
+
+
+@app.post("/api/activities/{activity_id}/start")
+def start_activity(activity_id: int):
+    _hyp_call(opp.start_activity, activity_id)
+    return {"ok": True}
+
+
+@app.post("/api/activities/{activity_id}/sources", status_code=201)
+def add_activity_source(activity_id: int, body: SourceCreate):
+    return {"id": _hyp_call(opp.add_source, activity_id, body.model_dump())}
+
+
+@app.post("/api/activities/{activity_id}/complete")
+def complete_activity(activity_id: int, body: ActivityComplete):
+    _hyp_call(opp.complete_activity, activity_id, body.model_dump())
+    return {"ok": True}
+
+
+@app.post("/api/activities/{activity_id}/cancel")
+def cancel_activity(activity_id: int, body: ReasonBody):
+    _hyp_call(opp.cancel_activity, activity_id, body.reason)
+    return {"ok": True}
+
+
+@app.post("/api/opportunities/{hypothesis_id}/select")
+def select_opportunity(hypothesis_id: int, body: ReasonBody):
+    _hyp_call(opp.select, hypothesis_id, body.reason)
+    return _hyp_call(opp.get_opportunity, hypothesis_id)
+
+
+@app.post("/api/opportunities/{hypothesis_id}/unselect")
+def unselect_opportunity(hypothesis_id: int, body: ReasonBody):
+    _hyp_call(opp.unselect, hypothesis_id, body.reason)
+    return _hyp_call(opp.get_opportunity, hypothesis_id)
 
 
 @app.post("/api/fetch")

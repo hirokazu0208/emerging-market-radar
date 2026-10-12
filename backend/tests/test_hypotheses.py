@@ -405,7 +405,12 @@ def test_v5_db_migrates_to_v6_preserving_data(stats_db):
     path = stats_db / "test.db"
     conn = sqlite3.connect(path)
     conn.execute("PRAGMA user_version = 5")
-    for t in ("hypothesis_events", "hypothesis_evidence_retractions", "hypothesis_evidence", "hypotheses"):
+    # v6 以降のテーブル・ビューを削除して v5 の状態を再現する
+    conn.execute("DROP VIEW current_opportunity_selections")
+    for t in ("opportunity_selections", "assessment_refs", "assessment_ref_policies", "opportunity_assessments",
+              "activity_result_evidence", "validation_activity_sources", "validation_activity_results",
+              "validation_activity_revisions", "validation_activities",
+              "hypothesis_events", "hypothesis_evidence_retractions", "hypothesis_evidence", "hypotheses"):
         conn.execute(f"DROP TABLE {t}")
     conn.commit()
     tables = ("articles", "article_markets", "article_labels", "stat_tables", "problem_observations")
@@ -413,7 +418,7 @@ def test_v5_db_migrates_to_v6_preserving_data(stats_db):
     conn.close()
     db.init_db(SOURCES)
     conn = sqlite3.connect(path)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION == 6
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
     assert {t: conn.execute(f"SELECT * FROM {t}").fetchall() for t in tables} == before
     conn.close()
 

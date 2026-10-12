@@ -238,6 +238,7 @@ function HypothesesContent() {
           <p className="subtitle">経営課題を手がかりにした、検証のための仮説（第2層）</p>
         </div>
         <div className="header-actions">
+          <Link href="/opportunities" className="nav-link">事業機会の比較・選定</Link>
           <Link href="/problems" className="nav-link">業種別の経営課題</Link>
           <Link href="/" className="nav-link">ニュース一覧</Link>
         </div>
@@ -332,6 +333,9 @@ function HypothesesContent() {
                 <button className="clear-button" onClick={() => setOpenId(openId === h.id ? null : h.id)}>
                   {openId === h.id ? "閉じる" : "詳細・編集・検証記録"}
                 </button>
+                <Link href={`/opportunities?hypothesis=${h.id}`} className="basis-link">
+                  事業機会の比較で見る
+                </Link>
               </div>
               {openId === h.id && <HypothesisDetail id={h.id} onChanged={refresh} />}
             </li>
