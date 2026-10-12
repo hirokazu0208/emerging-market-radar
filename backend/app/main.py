@@ -12,11 +12,11 @@ FETCH_LIMIT = 30
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    db.init_db()
+    db.init_db(SOURCES)
     yield
 
 
-app = FastAPI(title="Emerging Market Radar API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Emerging Market Radar API", version="0.2.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     # ローカル開発用：Next.js がポート3000以外で起動した場合も許可する
@@ -36,16 +36,19 @@ def categories():
     return {"categories": CATEGORIES}
 
 
+@app.get("/api/sources")
+def sources():
+    """情報源の一覧（所在地・利用条件・出典表記）。"""
+    return {"sources": db.list_sources()}
+
+
 @app.get("/api/articles")
 def articles(
     category: str | None = None,
+    market: db.MarketFilter | None = None,
     limit: int = Query(100, ge=1, le=500),
 ):
-    source_labels = {s.name: s.label for s in SOURCES}
-    rows = db.list_articles(category=category, limit=limit)
-    for row in rows:
-        row["source_label"] = source_labels.get(row["source"], row["source"])
-    return {"articles": rows}
+    return {"articles": db.list_articles(category=category, market=market, limit=limit)}
 
 
 @app.post("/api/fetch")
@@ -62,6 +65,6 @@ async def fetch():
         errors.extend(result.errors)
         fetched += len(result.articles)
         inserted += db.save_articles(
-            source.name, [(a, classify(a.title)) for a in result.articles]
+            source, [(a, a.category or classify(a.title)) for a in result.articles]
         )
     return {"fetched": fetched, "inserted": inserted, "errors": errors}

@@ -80,6 +80,7 @@ h1 {
 
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 16px;
   margin: 20px 0 12px;
@@ -181,4 +182,66 @@ h1 {
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.tabs {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.tab {
+  padding: 4px 14px;
+  border: none;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.tab + .tab {
+  border-left: 1px solid var(--border);
+}
+
+.tab.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.hint {
+  margin: -4px 0 12px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.market {
+  white-space: nowrap;
+}
+
+.footer {
+  margin-top: 32px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.footer h2 {
+  font-size: 0.9rem;
+  margin: 0 0 8px;
+}
+
+.footer ul {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+
+.footer a {
+  color: var(--accent);
+}
+
+.attribution {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
 }

@@ -52,6 +52,13 @@ def parse_item(item: dict | None) -> RawArticle | None:
 class HackerNewsSource:
     name = "hackernews"
     label = "Hacker News"
+    country = "US"
+    kind = "tech_news"
+    language = "en"
+    default_market = None  # 記事ごとに対象市場が異なるため未判定とする
+    homepage = "https://news.ycombinator.com/"
+    license = None
+    attribution = "Hacker News（Y Combinator）公式 Firebase API"
 
     def __init__(self, transport: httpx.AsyncBaseTransport | None = None):
         # transport はテストでモックを差し込むためのもの
