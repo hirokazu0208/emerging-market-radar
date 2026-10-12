@@ -6,6 +6,15 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 
 type Market = { market: string; method: string };
 
+type SignalLabel = {
+  label: string;
+  method: string;
+  strength: "explicit" | "inferred" | null;
+  evidence: string | null;
+  model: string | null;
+  rule_version: string | null;
+};
+
 type Article = {
   id: number;
   source: string;
@@ -19,6 +28,7 @@ type Article = {
   category: string;
   language: string | null;
   markets: Market[];
+  signals: SignalLabel[];
 };
 
 type Source = {
@@ -50,6 +60,32 @@ const METHOD_NAMES: Record<string, string> = {
   manual: "手動設定",
 };
 
+// 市場形成シグナル（signal_type）の表示名
+const SIGNAL_NAMES: Record<string, string> = {
+  new_service: "新サービス",
+  market_entry: "新規参入",
+  partnership: "提携",
+  funding: "資金調達",
+  expansion: "事業拡大",
+  new_segment: "新しい顧客層",
+  regulation: "規制・制度変更",
+};
+
+const STRENGTH_NAMES: Record<string, string> = {
+  explicit: "明示記述",
+  inferred: "推測",
+};
+
+function signalName(label: string): string {
+  return SIGNAL_NAMES[label] ?? label;
+}
+
+// キーワード判定は「候補（明示記述／推測）」、それ以外は判定方法を表示する
+function signalBasis(s: SignalLabel): string {
+  if (s.method === "keyword") return `候補・${STRENGTH_NAMES[s.strength ?? ""] ?? "キーワード"}`;
+  return METHOD_NAMES[s.method] ?? s.method;
+}
+
 const jstFormatter = new Intl.DateTimeFormat("ja-JP", {
   timeZone: "Asia/Tokyo",
   year: "numeric",
@@ -73,18 +109,20 @@ export default function Home() {
   const [sources, setSources] = useState<Source[]>([]);
   const [category, setCategory] = useState("");
   const [market, setMarket] = useState<MarketFilter>("");
+  const [signal, setSignal] = useState("");
   const [loading, setLoading] = useState(true);
   const [fetching, setFetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fetchResult, setFetchResult] = useState<FetchResult | null>(null);
 
-  const loadArticles = useCallback(async (selectedCategory: string, selectedMarket: MarketFilter) => {
+  const loadArticles = useCallback(async (selectedCategory: string, selectedMarket: MarketFilter, selectedSignal: string) => {
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams();
       if (selectedCategory) params.set("category", selectedCategory);
       if (selectedMarket) params.set("market", selectedMarket);
+      if (selectedSignal) params.set("signal", selectedSignal);
       const query = params.toString() ? `?${params}` : "";
       const res = await fetch(`${API_BASE}/api/articles${query}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -111,8 +149,8 @@ export default function Home() {
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 外部APIとの同期のための取得
-    loadArticles(category, market);
-  }, [category, market, loadArticles]);
+    loadArticles(category, market, signal);
+  }, [category, market, signal, loadArticles]);
 
   async function handleFetch() {
     setFetching(true);
@@ -122,7 +160,7 @@ export default function Home() {
       const res = await fetch(`${API_BASE}/api/fetch`, { method: "POST" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setFetchResult(await res.json());
-      await loadArticles(category, market);
+      await loadArticles(category, market, signal);
     } catch (e) {
       setError(`ニュースの取得に失敗しました。(${e})`);
     } finally {
@@ -131,7 +169,7 @@ export default function Home() {
   }
 
   const emptyMessage =
-    market || category
+    market || category || signal
       ? "条件に該当する記事がありません。"
       : "記事がありません。「ニュースを取得」を押してください。";
 
@@ -176,6 +214,19 @@ export default function Home() {
       {market === "overseas" && (
         <p className="hint">対象市場が未判定の記事（Hacker News など）は「すべて」にのみ表示されます。</p>
       )}
+      {signal && (
+        <div className="signal-filter">
+          シグナル「{signalName(signal)}」で絞り込み中
+          <button className="clear-button" onClick={() => setSignal("")}>
+            × 解除
+          </button>
+        </div>
+      )}
+      <p className="disclaimer">
+        市場形成シグナルは、タイトル・要約へのキーワード・ルール判定による<strong>候補</strong>です。
+        「明示記述」は記事に明示的な記述があることを示し、事実確認済みを意味しません。「推測」はルールによる推測候補です。
+        市場の成長やソフトウェア需要を示すものではありません。根拠が見つからない記事にはラベルを付けていません。
+      </p>
 
       {fetchResult && (
         <div className="notice">
@@ -224,6 +275,38 @@ export default function Home() {
                 {a.title}
               </a>
               {a.summary && <p className="summary">{a.summary}</p>}
+              {a.signals.length > 0 && (
+                <div className="signals">
+                  {a.signals.map((s) => (
+                    <button
+                      key={`${s.label}-${s.method}-${s.model ?? ""}`}
+                      className={`signal signal-${s.strength ?? "other"}${signal === s.label ? " active" : ""}`}
+                      onClick={() => setSignal(s.label)}
+                      title={`「${signalName(s.label)}」の記事で絞り込む`}
+                    >
+                      {signalName(s.label)}
+                      <span className="signal-basis">{signalBasis(s)}</span>
+                    </button>
+                  ))}
+                  {a.source === "egov_pcm" && a.signals.some((s) => s.label === "regulation") && (
+                    <span className="signal-note">改正案等の意見募集であり、成立・施行済みではありません</span>
+                  )}
+                  <details className="evidence">
+                    <summary>判定の根拠</summary>
+                    <ul>
+                      {a.signals.map((s) => (
+                        <li key={`${s.label}-${s.method}-${s.model ?? ""}`}>
+                          <strong>{signalName(s.label)}</strong>（{signalBasis(s)}
+                          {s.method === "keyword" && "・キーワード判定"}
+                          {s.rule_version && `・ルール ${s.rule_version}`}
+                          {s.model && `・${s.model}`}）
+                          {s.evidence && <div className="evidence-text">{s.evidence}</div>}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                </div>
+              )}
             </li>
           ))}
         </ul>

@@ -1,10 +1,11 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import db
 from .classifier import CATEGORIES, classify
+from .labels import TAXONOMIES
 from .sources import SOURCES
 
 FETCH_LIMIT = 30
@@ -46,9 +47,18 @@ def sources():
 def articles(
     category: str | None = None,
     market: db.MarketFilter | None = None,
+    signal: str | None = None,
     limit: int = Query(100, ge=1, le=500),
 ):
-    return {"articles": db.list_articles(category=category, market=market, limit=limit)}
+    if signal and signal not in TAXONOMIES["signal_type"][1]:
+        raise HTTPException(status_code=422, detail=f"未定義の signal です: {signal}")
+    return {"articles": db.list_articles(category=category, market=market, signal=signal, limit=limit)}
+
+
+@app.get("/api/signal-types")
+def signal_types():
+    """市場形成シグナル（signal_type）のラベル一覧。"""
+    return {"signal_types": list(TAXONOMIES["signal_type"][1])}
 
 
 @app.post("/api/fetch")

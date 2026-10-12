@@ -245,3 +245,90 @@ h1 {
   margin: 2px 0 0;
   overflow-wrap: anywhere;
 }
+
+.signal-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  font-size: 0.85rem;
+}
+
+.clear-button {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.disclaimer {
+  margin: 0 0 12px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.signals {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.signal {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--accent);
+  background: var(--surface);
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 1px 10px;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.signal-inferred {
+  border-style: dashed;
+  color: var(--muted);
+  border-color: var(--muted);
+}
+
+.signal.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.signal-basis {
+  font-size: 0.7rem;
+  opacity: 0.85;
+}
+
+.signal-note {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.evidence {
+  flex-basis: 100%;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.evidence summary {
+  cursor: pointer;
+  width: fit-content;
+}
+
+.evidence ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.evidence-text {
+  overflow-wrap: anywhere;
+}

@@ -116,7 +116,7 @@ def test_migrates_v2_db_to_v3_without_losing_data(v2_db):
 
     conn = sqlite3.connect(v2_db)
     conn.row_factory = sqlite3.Row
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
     # 記事・市場ラベルはそのまま（HN に市場を推測して付けない）
     assert [tuple(r) for r in conn.execute("SELECT * FROM articles ORDER BY id")] == articles_before
     assert [tuple(r) for r in conn.execute("SELECT * FROM article_markets")] == markets_before

@@ -105,6 +105,11 @@ MIGRATIONS: dict[int, str] = {
         ON article_labels (article_id, taxonomy, label, method, IFNULL(model, ''));
     CREATE INDEX idx_article_labels_label ON article_labels (taxonomy, label);
     """,
+    4: """
+    -- keyword 判定の強さ（explicit：記事に明示的な記述あり / inferred：ルールによる推測）と、判定ルールの版
+    ALTER TABLE article_labels ADD COLUMN strength TEXT CHECK (strength IN ('explicit', 'inferred'));
+    ALTER TABLE article_labels ADD COLUMN rule_version TEXT;
+    """,
 }
 SCHEMA_VERSION = max(MIGRATIONS)
 
@@ -222,12 +227,22 @@ MarketFilter = Literal["home", "overseas"]
 
 
 def list_articles(
-    category: str | None = None, market: MarketFilter | None = None, limit: int = 100
+    category: str | None = None,
+    market: MarketFilter | None = None,
+    signal: str | None = None,
+    limit: int = 100,
 ) -> list[dict]:
     """market: 'home' = 日本市場を対象とする記事、'overseas' = 日本以外の市場を対象とする記事。
-    市場が未判定の記事はどちらにも含めない（market 未指定時のみ表示）。"""
+    市場が未判定の記事はどちらにも含めない（market 未指定時のみ表示）。
+    signal: その signal_type ラベルを持つ記事に絞る（判定方法は問わない）。"""
     conditions: list[str] = []
     params: list = []
+    if signal:
+        conditions.append(
+            "EXISTS (SELECT 1 FROM article_labels l "
+            "WHERE l.article_id = a.id AND l.taxonomy = 'signal_type' AND l.label = ?)"
+        )
+        params.append(signal)
     if category:
         conditions.append("a.category = ?")
         params.append(category)
@@ -241,7 +256,12 @@ def list_articles(
     query = """
         SELECT a.*, COALESCE(s.label, a.source) AS source_label, s.country AS source_country,
                (SELECT json_group_array(json_object('market', m.market, 'method', m.method))
-                  FROM article_markets m WHERE m.article_id = a.id) AS markets
+                  FROM article_markets m WHERE m.article_id = a.id) AS markets,
+               (SELECT json_group_array(json_object(
+                         'label', l.label, 'method', l.method, 'strength', l.strength,
+                         'evidence', l.evidence, 'model', l.model, 'rule_version', l.rule_version))
+                  FROM (SELECT * FROM article_labels WHERE article_id = a.id AND taxonomy = 'signal_type'
+                        ORDER BY label, method) l) AS signals
         FROM articles a LEFT JOIN sources s ON s.id = a.source
     """
     if conditions:
@@ -253,6 +273,7 @@ def list_articles(
         rows = [dict(row) for row in conn.execute(query, params)]
     for row in rows:
         row["markets"] = json.loads(row["markets"])
+        row["signals"] = json.loads(row["signals"])
         row["metadata"] = json.loads(row["metadata"]) if row["metadata"] else {}
     return rows
 

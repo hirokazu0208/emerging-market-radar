@@ -14,6 +14,7 @@ from typing import Literal
 from . import db
 
 AssertionKind = Literal["observation", "hypothesis"]
+Strength = Literal["explicit", "inferred"]
 Method = Literal["source_default", "keyword", "ai", "manual"]
 
 # taxonomy → (性質, ラベル一覧)。DB 側の label_definitions（MIGRATIONS[3]）と一致させる
@@ -69,6 +70,37 @@ def add_article_label(
         return True
 
 
+def replace_keyword_labels(
+    conn: sqlite3.Connection,
+    article_id: int,
+    taxonomy: str,
+    labels: list[tuple[str, Strength, str]],
+    rule_version: str,
+) -> tuple[int, int]:
+    """記事の method='keyword' のラベルを、指定した (label, strength, evidence) で置き換える。
+
+    人手（manual）・AI（ai）など他の method の行には触れない。呼び出し側のトランザクション内で実行する。
+    戻り値は (削除した件数, 登録した件数)。
+    """
+    for label, strength, _ in labels:
+        validate(taxonomy, label, "keyword", None)
+        if strength not in ("explicit", "inferred"):
+            raise ValueError(f"未定義の strength です: {strength}")
+    deleted = conn.execute(
+        "DELETE FROM article_labels WHERE article_id = ? AND taxonomy = ? AND method = 'keyword'",
+        (article_id, taxonomy),
+    ).rowcount
+    created_at = db.now()
+    conn.executemany(
+        """INSERT INTO article_labels
+           (article_id, taxonomy, label, method, evidence, model, created_at, strength, rule_version)
+           VALUES (?, ?, ?, 'keyword', ?, NULL, ?, ?, ?)""",
+        [(article_id, taxonomy, label, evidence, created_at, strength, rule_version)
+         for label, strength, evidence in labels],
+    )
+    return deleted, len(labels)
+
+
 def list_article_labels(
     article_id: int,
     taxonomy: str | None = None,
@@ -77,7 +109,7 @@ def list_article_labels(
     """記事のラベルを取得する。各行に assertion_kind（observation / hypothesis）を含める。"""
     query = """
         SELECT l.article_id, l.taxonomy, l.label, d.assertion_kind, l.method,
-               l.evidence, l.model, l.created_at
+               l.evidence, l.model, l.created_at, l.strength, l.rule_version
         FROM article_labels l
         JOIN label_definitions d ON d.taxonomy = l.taxonomy AND d.label = l.label
         WHERE l.article_id = ?

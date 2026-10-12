@@ -1,6 +1,7 @@
-# Emerging Market Radar v0.3
+# Emerging Market Radar v0.4
 
 世界で新しく生まれる市場・産業の兆候を発見するため、公開ニュースを収集・分類・保存・表示するMVPです。
+最終的には、個人開発者が自社SaaSを開発・販売できる事業機会の発見を目指します（[将来構想](#将来構想3層の分析と5つの業務領域)）。
 
 - バックエンド：Python + FastAPI + SQLite
 - フロントエンド：Next.js + TypeScript
@@ -54,11 +55,109 @@ v0.3（データ構造の整備のみ。画面・取得機能は v0.2 と同じ�
 - ラベルの登録・取得の内部関数（`backend/app/labels.py`）
 - v2 → v3 の自動マイグレーション（既存の記事・市場ラベルは変更しない）
 
+v0.4（第1層：市場形成シグナルの抽出）
+
+- タイトル・要約のキーワード・ルールで `signal_type` を判定（日本語・英語）
+  - ルールの定義：`backend/app/signals.py`
+  - 判定結果は `method='keyword'` で `article_labels` に保存
+- 判定の強さ（`strength`）と、判定ルールの版（`rule_version`）を保存（v3 → v4 マイグレーション）
+- 既存記事を手動で分析する CLI（`python -m app.analyze`）
+- 画面にシグナルの候補ラベルを表示
+  - ラベルをクリックすると、そのシグナルの記事に絞り込み
+  - 「判定の根拠」で根拠を表示
+  - ラベルの無い記事もそのまま表示
+
+## 市場形成シグナル（第1層）の判定について
+
+判定結果は、すべて**キーワード・ルールによる候補**です。
+
+| strength | 意味 |
+| --- | --- |
+| `explicit`（画面：候補・明示記述） | 記事のタイトル・要約に、出来事を述べる明示的な記述がある。**独立に事実確認されたことを意味しない** |
+| `inferred`（画面：候補・推測） | 関連語や投稿形式から、ルールで推測した候補 |
+
+- タイトル・要約に根拠が無い記事には、ラベルを付けません（「未判定」）。
+- キーワードが一致したことをもって、市場の成長やSaaS需要を確定するものではありません。
+
+誤判定を減らすため、次の処理を行います。
+
+- **否定・中止**：一致箇所の近くに否定・中止の表現があれば、ラベルを付けない
+  - 英語：not, cancels, delayed, fails to, ends など
+  - 日本語：中止, 延期, 解消, できず など
+- **検討・提案・予定・目的**：inferred に下げる
+  - 英語：plans to, call for, may, for expansion など
+  - 日本語：検討, 予定, 見込み など
+- **質問・解説・回顧の記事**：inferred に下げる
+  - 英語：末尾の「?」, How, Why, Ask HN など
+  - 日本語：とは, 解説, まとめ など
+- **別の意味の語**は除外する
+  - 英語：rocket launch, urban など
+  - 日本語：参入障壁, 感染拡大 など
+
+情報源ごとの扱いは次のとおりです。
+
+- **Show HN**：製品・サービスの公開と読み取れる場合に限り `new_service` の inferred とする。名前とその説明、「I built」、app / tool などの語が手がかり。投稿形式だけでは判定しない
+- **e-Gov パブリック・コメント**：意見募集・改正案を `regulation` の explicit とする
+  - **改正案等の意見募集であり、成立・施行済みではありません**
+  - この注記は、根拠と画面の両方に表示します
+
+### 分析の実行（CLI）
+
+```bash
+cd backend
+.venv/bin/python -m app.analyze              # 全件
+.venv/bin/python -m app.analyze --limit 20   # 公開日時の新しい順に20件
+.venv/bin/python -m app.analyze --dry-run    # DBに書き込まず結果だけ表示
+```
+
+- 表示する内容：分析件数、ラベルが付いた記事数、未判定の件数、付与したラベル数（種類・強さ別）、注意書き
+- ニュース取得時に自動では実行しません。新しく取得した記事に対しては、CLI を再実行してください。
+- **再計算**：同じ記事を再分析すると、その記事の `method='keyword'` の `signal_type` ラベルだけを置き換えます。
+  - 重複はしません。ルールを変更した場合も、再実行すれば新しいルールで計算し直されます。
+  - ルールを変更したら `signals.py` の `RULESET_VERSION` を更新してください。
+  - 人手（`manual`）・AI（`ai`）の判定、記事、市場ラベルには触れません。
+  - 全件を1トランザクションで処理するため、途中で失敗した場合は何も変更されません。
+
+## 将来構想：3層の分析と5つの業務領域
+
+このRadarの目的は、成長市場を見つけることだけではありません。**個人開発者が提供できるSaaSの事業機会**を見つけることを目指します。
+分析は次の3層に分け、層ごとに「観測した事実」と「推測」を区別して扱います。
+
+| 層 | 内容 | 状態 |
+| --- | --- | --- |
+| 第1層：市場形成シグナル | 新サービス、新規参入、提携、資金調達、事業拡大、新しい顧客層、規制 | **v0.4 で実装**（キーワード・ルールによる候補） |
+| 第2層：顧客課題・ソフトウェア需要の兆候 | 5つの業務領域ごとの顧客課題（集客難、営業課題、手作業、請求漏れ、解約増加など） | 未実装 |
+| 第3層：個人SaaS参入可能性 | 顧客の支払意思、開発規模、競合、販売経路、継続運用の負担 | 未実装 |
+
+### 第2層の5つの業務領域（対等に扱う）
+
+| 領域 | 対象 |
+| --- | --- |
+| Marketing | 認知拡大、集客、広告、SEO、SNS、顧客獲得 |
+| Sales | 販路開拓、見込み客発掘、商談、提案、成約 |
+| Operations | 業務管理、自動化、予約、在庫、人員配置 |
+| Finance | 請求、入金、収益、価格、会計 |
+| Customer Success | 顧客維持、継続利用、解約防止、リピート |
+
+第2層・第3層の設計方針は次のとおりです。
+
+- 5領域を対等に扱い、Operations に偏らないようにする。
+- 特に、「商品・サービスはあるが、集客方法や販売方法が確立していない事業者」の課題（Marketing・Sales）を重要な分析対象とする。
+- 第2層では、**記事に記載された顧客課題（観測）** と、**そこから推測したソフトウェア需要（仮説）** を区別する。
+  - 既存の `article_labels` では、`signal_type` が観測、`software_domain` が仮説にあたる（`assertion_kind` で区別）。
+  - 第2層の実装時に、顧客課題を観測として記録する taxonomy を追加する予定。
+- 市場の新規性や成長性（第1層）だけで、SaaS需要（第2層）があると断定しない。
+  - 第3層は、第2層の課題に対して、個人開発者が参入できるかを別途評価する。
+- 各領域に適した情報源（例：集客・販売の課題が書かれやすい情報源）を後から追加できるよう、情報源は `backend/app/sources/` に独立したモジュールとして追加する。
+  - 利用条件は `sources.commercial_use` で管理する。
+
 ## 未実装（今後の予定）
 
-- AI による `signal_type` / `software_domain` の自動判定（現在、ラベルは1件も登録されていません）
-- キーワードによるラベル判定
-- ラベルの画面表示と、ラベルを登録・取得する HTTP API（現在は内部関数のみ）
+- 第2層（5領域の顧客課題・ソフトウェア需要）と、第3層（個人SaaS参入可能性）の分析
+- AI による判定（`signal_type` / `software_domain`）
+- `software_domain` の自動生成（現在、`software_domain` のラベルは1件もありません）
+- ニュース取得後の自動分析（現在は CLI による手動実行）
+- ラベルを登録・編集する HTTP API・画面（現在は内部関数のみ）
 - 企業情報（`organizations`）と国税庁法人番号との照合
 - 受信データの原文保存（`raw_payload`）
 - Hacker News・e-Gov 以外の情報源
@@ -82,7 +181,7 @@ python3 -m venv .venv
 ```
 
 DBは初回起動時に `backend/data/radar.db` に作成されます（環境変数 `RADAR_DB_PATH` で変更可）。
-v0.1・v0.2 のDBがある場合は、起動時に自動で最新のスキーマ（v3）へマイグレーションします（後述）。
+v0.1〜v0.3 のDBがある場合は、起動時に自動で最新のスキーマ（v4）へマイグレーションします（後述）。
 
 ### 2. フロントエンド（http://localhost:3000）
 
@@ -117,7 +216,8 @@ npm run build
 | GET | `/api/health` | ヘルスチェック |
 | GET | `/api/categories` | カテゴリー一覧 |
 | GET | `/api/sources` | 情報源一覧（所在地・利用条件・商用利用の可否・確認日・出典表記） |
-| GET | `/api/articles?market=home&category=AI&limit=100` | 記事一覧（公開日時の新しい順） |
+| GET | `/api/articles?market=home&category=AI&signal=funding&limit=100` | 記事一覧（公開日時の新しい順）。各記事に `signals`（signal_type ラベル）を含む |
+| GET | `/api/signal-types` | 市場形成シグナル（signal_type）の一覧 |
 | POST | `/api/fetch` | 全情報源から最新記事を取得・保存。`{fetched, inserted, errors}` を返す |
 
 `market` パラメータは次のとおりです。
@@ -127,6 +227,8 @@ npm run build
 - `overseas`：JP 以外の市場を対象とする記事
 
 対象市場が未判定の記事は、`home` にも `overseas` にも含まれません。
+
+`signal` パラメータには `signal_type` のラベル（`new_service` など）を指定します。そのラベルを持つ記事だけに絞り込みます（判定方法は問いません）。未定義の値は 422 になります。
 
 外部APIでエラーが起きても、`/api/fetch` は 200 を返し、内容を `errors` に入れます。アプリ全体は停止せず、保存済みの記事も削除しません。
 
@@ -186,6 +288,8 @@ npm run build
 | `evidence` | 判定の根拠（記事中の該当箇所の抜粋など） |
 | `model` | AI 判定時のモデル名・プロンプト版。`method = 'ai'` のときは必須、それ以外は NULL（CHECK 制約） |
 | `created_at` | 登録日時（UTC） |
+| `strength` | keyword 判定の強さ：`explicit`（記事に明示的な記述あり）／`inferred`（ルールによる推測）。他の method では NULL |
+| `rule_version` | keyword 判定のルールの版（例：`kw-2026.10.1`） |
 
 - 同じ記事・ラベル・判定主体・モデルの組は1件のみ登録できます。
 - 人手の判定と AI の判定、AI のモデル違いは、別の行として残ります。
@@ -193,17 +297,18 @@ npm run build
 内部関数（`backend/app/labels.py`）は次のとおりです。
 
 - `add_article_label(article_id, taxonomy, label, method, evidence=None, model=None) -> bool`：登録する。重複していれば `False`。不正な値は `ValueError`
-- `list_article_labels(article_id, taxonomy=None, assertion_kind=None) -> list[dict]`：取得する。各行に `assertion_kind` を含む
+- `list_article_labels(article_id, taxonomy=None, assertion_kind=None) -> list[dict]`：取得する。各行に `assertion_kind`・`strength`・`rule_version` を含む
+- `replace_keyword_labels(conn, article_id, taxonomy, labels, rule_version)`：その記事の `method='keyword'` のラベルだけを置き換える（CLI が使用）
 
 ### マイグレーション
 
 スキーマのバージョンは `PRAGMA user_version` で管理しています（`backend/app/db.py` の `MIGRATIONS`）。
 
 - v0.1 のDB（`user_version = 0`）は、起動時に v2、v3 の順に移行します。各段階は1トランザクションで適用されます。
-- v0.2 のDB（`user_version = 2`）は、v3 に移行します。
-- どちらの場合も、既存の記事・取得日時・市場ラベルは保持されます。
+- v0.2 のDB（`user_version = 2`）は v3、v4 の順に、v0.3 のDB（`user_version = 3`）は v4 に移行します。
+- いずれの場合も、既存の記事・取得日時・市場ラベル・ラベルは保持されます。
 - 既存記事の `language` は、情報源の定義から補完します。
-- v3 の移行では、ラベルは追加しません。
+- 移行ではラベルを追加しません。keyword のラベルは CLI を実行したときだけ作られます。
 
 記事本文のスクレイピングは行わず、公開API・RSSから取得できる情報だけを保存します。
 
@@ -230,6 +335,8 @@ backend/
     db.py            SQLite保存・取得・マイグレーション
     classifier.py    キーワード分類
     labels.py        記事ラベルの語彙・登録・取得
+    signals.py       市場形成シグナルのキーワード・ルール
+    analyze.py       シグナル判定の CLI
     sources/
       base.py        情報源インターフェース（RawArticle / FetchResult / Source）
       hackernews.py  Hacker News 取得処理
