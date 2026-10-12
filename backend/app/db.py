@@ -60,6 +60,51 @@ MIGRATIONS: dict[int, str] = {
     );
     CREATE INDEX idx_article_markets_market ON article_markets (market);
     """,
+    3: """
+    -- 情報源ごとの利用条件。確認できていないものは 'unknown'（商用利用可とみなさない）
+    ALTER TABLE sources ADD COLUMN terms_url TEXT;
+    ALTER TABLE sources ADD COLUMN commercial_use TEXT NOT NULL DEFAULT 'unknown'
+        CHECK (commercial_use IN ('allowed', 'restricted', 'unknown'));
+    ALTER TABLE sources ADD COLUMN terms_checked_on TEXT;   -- 利用条件を確認した日（YYYY-MM-DD）
+
+    -- ラベルの語彙。assertion_kind で「観測事実」と「需要の仮説」を区別する
+    CREATE TABLE label_definitions (
+        taxonomy       TEXT NOT NULL,
+        label          TEXT NOT NULL,
+        assertion_kind TEXT NOT NULL CHECK (assertion_kind IN ('observation', 'hypothesis')),
+        PRIMARY KEY (taxonomy, label)
+    );
+    INSERT INTO label_definitions (taxonomy, label, assertion_kind) VALUES
+        ('signal_type', 'new_service', 'observation'),
+        ('signal_type', 'market_entry', 'observation'),
+        ('signal_type', 'partnership', 'observation'),
+        ('signal_type', 'funding', 'observation'),
+        ('signal_type', 'expansion', 'observation'),
+        ('signal_type', 'new_segment', 'observation'),
+        ('signal_type', 'regulation', 'observation'),
+        ('software_domain', 'marketing', 'hypothesis'),
+        ('software_domain', 'sales', 'hypothesis'),
+        ('software_domain', 'operations', 'hypothesis'),
+        ('software_domain', 'finance', 'hypothesis'),
+        ('software_domain', 'customer_success', 'hypothesis');
+
+    -- 記事ラベル。判定の主体を method で区別し、AI 判定は model を必須とする
+    CREATE TABLE article_labels (
+        article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+        taxonomy   TEXT NOT NULL,
+        label      TEXT NOT NULL,
+        method     TEXT NOT NULL CHECK (method IN ('source_default', 'keyword', 'ai', 'manual')),
+        evidence   TEXT,              -- 判定の根拠（記事中の該当箇所の抜粋など）
+        model      TEXT,              -- AI 判定時のモデル名・プロンプト版
+        created_at TEXT NOT NULL,
+        CHECK ((method = 'ai') = (model IS NOT NULL)),
+        FOREIGN KEY (taxonomy, label) REFERENCES label_definitions (taxonomy, label)
+    );
+    -- 同じ判定主体による同一ラベルの重複を防ぐ（model 違いの AI 判定は別行として残す）
+    CREATE UNIQUE INDEX ux_article_labels
+        ON article_labels (article_id, taxonomy, label, method, IFNULL(model, ''));
+    CREATE INDEX idx_article_labels_label ON article_labels (taxonomy, label);
+    """,
 }
 SCHEMA_VERSION = max(MIGRATIONS)
 
@@ -82,7 +127,7 @@ def connect() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
-def _now() -> str:
+def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
@@ -96,19 +141,34 @@ def migrate(conn: sqlite3.Connection) -> None:
         )
 
 
+def commercial_use_of(source: Source) -> str:
+    """商用利用の可否。利用条件のURLと確認日が揃っていない 'allowed' は 'unknown' として扱う。"""
+    value = getattr(source, "commercial_use", None)
+    if value not in ("allowed", "restricted"):
+        return "unknown"
+    if value == "allowed" and not (getattr(source, "terms_url", None) and getattr(source, "terms_checked_on", None)):
+        return "unknown"
+    return value
+
+
 def sync_sources(conn: sqlite3.Connection, sources: list[Source]) -> None:
     """情報源の定義を sources テーブルへ反映し、既存記事の言語・既定市場を補完する。"""
-    now = _now()
+    timestamp = now()
     for s in sources:
         conn.execute(
-            """INSERT INTO sources (id, label, country, kind, language, homepage, license, attribution, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """INSERT INTO sources (id, label, country, kind, language, homepage, license, attribution,
+                                    terms_url, commercial_use, terms_checked_on, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT (id) DO UPDATE SET
                  label = excluded.label, country = excluded.country, kind = excluded.kind,
                  language = excluded.language, homepage = excluded.homepage,
                  license = excluded.license, attribution = excluded.attribution,
+                 terms_url = excluded.terms_url, commercial_use = excluded.commercial_use,
+                 terms_checked_on = excluded.terms_checked_on,
                  updated_at = excluded.updated_at""",
-            (s.name, s.label, s.country, s.kind, s.language, s.homepage, s.license, s.attribution, now),
+            (s.name, s.label, s.country, s.kind, s.language, s.homepage, s.license, s.attribution,
+             getattr(s, "terms_url", None), commercial_use_of(s), getattr(s, "terms_checked_on", None),
+             timestamp),
         )
         conn.execute(
             "UPDATE articles SET language = ? WHERE source = ? AND language IS NULL",
@@ -120,7 +180,7 @@ def sync_sources(conn: sqlite3.Connection, sources: list[Source]) -> None:
                 """INSERT INTO article_markets (article_id, market, method, created_at)
                    SELECT id, ?, 'source_default', ? FROM articles
                    WHERE source = ? AND id NOT IN (SELECT article_id FROM article_markets)""",
-                (s.default_market, now, s.name),
+                (s.default_market, timestamp, s.name),
             )
 
 
@@ -132,7 +192,7 @@ def init_db(sources: list[Source]) -> None:
 
 def save_articles(source: Source, articles: list[tuple[RawArticle, str]]) -> int:
     """(記事, カテゴリー) を保存し、新規に登録された件数を返す。既存IDは無視する。"""
-    fetched_at = _now()
+    fetched_at = now()
     inserted = 0
     with connect() as conn:
         sync_sources(conn, [source])
@@ -200,5 +260,6 @@ def list_articles(
 def list_sources() -> list[dict]:
     with connect() as conn:
         return [dict(row) for row in conn.execute(
-            "SELECT id, label, country, kind, language, homepage, license, attribution FROM sources ORDER BY id"
+            "SELECT id, label, country, kind, language, homepage, license, attribution,"
+            " terms_url, commercial_use, terms_checked_on FROM sources ORDER BY id"
         )]

@@ -6,7 +6,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Protocol
+from typing import Literal, Protocol
 
 
 @dataclass
@@ -38,6 +38,9 @@ class Source(Protocol):
     homepage: str
     license: str | None  # 利用条件（例: "PDL1.0"）
     attribution: str | None  # 画面・README に表示する出典表記
+    terms_url: str | None  # 利用条件のページ
+    commercial_use: Literal["allowed", "restricted", "unknown"]  # 確認できていなければ "unknown"
+    terms_checked_on: str | None  # 利用条件を確認した日（YYYY-MM-DD）
 
     async def fetch(self, limit: int) -> FetchResult:
         """最新記事を取得する。外部APIエラーは例外ではなく errors に入れて返す。"""

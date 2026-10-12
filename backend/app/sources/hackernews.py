@@ -59,6 +59,9 @@ class HackerNewsSource:
     homepage = "https://news.ycombinator.com/"
     license = None
     attribution = "Hacker News（Y Combinator）公式 Firebase API"
+    terms_url = None
+    commercial_use = "unknown"  # 商用利用の条件は未確認
+    terms_checked_on = None
 
     def __init__(self, transport: httpx.AsyncBaseTransport | None = None):
         # transport はテストでモックを差し込むためのもの

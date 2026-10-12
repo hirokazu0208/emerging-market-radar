@@ -118,6 +118,9 @@ class EgovPublicCommentSource:
         "出典：e-Govパブリック・コメント（https://public-comment.e-gov.go.jp/）"
         "（RSSを本アプリが加工して作成：書式変換・項目抽出・カテゴリー分類）"
     )
+    terms_url = "https://public-comment.e-gov.go.jp/contents/terms"
+    commercial_use = "allowed"  # PDL1.0：出典の記載と、加工した旨の明示が条件
+    terms_checked_on = "2026-10-12"
 
     def __init__(self, transport: httpx.AsyncBaseTransport | None = None):
         # transport はテストでモックを差し込むためのもの
