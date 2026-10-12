@@ -1,0 +1,23 @@
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# env
+.env
+.env.*
+
+# Python (backend)
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# SQLite データ（実行時に生成）
+backend/data/
+*.db
+*.db-journal
+
+# Node / Next.js (frontend 側にも .gitignore あり)
+node_modules/
+.next/
