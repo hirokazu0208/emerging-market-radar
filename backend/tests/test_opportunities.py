@@ -87,6 +87,8 @@ def test_v6_db_migrates_to_v7_preserving_existing_tables(env):
               "validation_activity_revisions", "validation_activities"):
         conn.execute(f"DROP TABLE {t}")
     conn.execute("DROP TRIGGER trg_hypotheses_reject_selected")
+    for c in ("fetch_etag", "fetch_last_modified", "last_fetched_at", "last_fetch_status", "last_fetch_error"):
+        conn.execute(f"ALTER TABLE sources DROP COLUMN {c}")  # v8 で追加した列
     conn.execute("PRAGMA user_version = 6")
     conn.commit()
     conn.close()

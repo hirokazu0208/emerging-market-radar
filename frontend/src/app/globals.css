@@ -731,3 +731,17 @@ li.retracted {
   opacity: 0.6;
   text-decoration: line-through;
 }
+
+/* --- 公式フィードの公式カテゴリー（情報源が付けた分類） --- */
+.feed-categories {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.feed-categories-label {
+  font-size: 0.72rem;
+  color: var(--muted);
+}

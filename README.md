@@ -1,4 +1,4 @@
-# Emerging Market Radar v0.7
+# Emerging Market Radar v0.8
 
 世界で新しく生まれる市場・産業の兆候を発見するため、公開ニュースを収集・分類・保存・表示するMVPです。
 最終的には、個人開発者が自社SaaSを開発・販売できる事業機会の発見を目指します（[将来構想](#将来構想3層の分析と5つの業務領域)）。
@@ -11,6 +11,10 @@
 | --- | --- | --- | --- | --- | --- |
 | [Hacker News](https://news.ycombinator.com/) | [公式 Firebase API](https://github.com/HackerNews/API) | US | 未判定 | 未確認 | `unknown` |
 | [e-Govパブリック・コメント](https://public-comment.e-gov.go.jp/) | [意見募集案件RSS](https://public-comment.e-gov.go.jp/rss/pcm_list.xml) | JP | JP | [公共データ利用規約（PDL1.0）](https://public-comment.e-gov.go.jp/contents/terms) | `allowed`（出典の記載と加工した旨の明示が条件。2026-10-12 確認） |
+| [Shopify Developer Changelog](https://shopify.dev/changelog) | [公式RSS](https://shopify.dev/changelog/feed.xml) | CA | 未判定 | 未確認 | `unknown` |
+| [freee Developers](https://developer.freee.co.jp/) | [公式RSS](https://developer.freee.co.jp/feed) | JP | 未判定 | 未確認 | `unknown` |
+
+公式フィード（Shopify・freee）は利用条件を確認できていないため、タイトル・元記事の URL・公開日時・短い抜粋（約280文字）・公式カテゴリーだけを保存します。本文は保存せず、元記事へリンクします。
 
 利用条件を確認できていない情報源は `unknown` とし、商用利用可とはみなしません。
 
@@ -116,6 +120,45 @@ v0.7（事業機会の比較・選定・検証計画）
 - 開始前の記録を参照した結果は、「事後評価」として区別して表示
 - 根拠の取り消し・矛盾する記録の追加では履歴を変えず、「再評価が必要」と表示
 - v6 → v7 マイグレーション（既存テーブルは作り直さず、索引1つとトリガー1つの追加と、新しいテーブル9つ）
+
+v0.8 Step 2（公式フィードの収集）
+
+- 汎用の公式フィード収集（`backend/app/sources/feed.py` の `FeedSource`・`FeedConfig`）
+  - Shopify Developer Changelog と freee Developers を追加
+- 公式カテゴリー（例：Breaking API Change、新規機能・改善）を記事の `metadata.feed_categories` に保存し、ニュース画面に「公式カテゴリー」として表示
+- 条件付き取得（ETag・Last-Modified）、取得の最短間隔（60分）、タイムアウト、レスポンスサイズの上限、DOCTYPE・ENTITY を含む XML の拒否
+- 取得状態を `sources` に追加した列で管理（v7 → v8 マイグレーション。新しいテーブルは作らない）
+- ニュース画面のフッターに、各情報源の商用利用の条件（未確認）と直近の取得結果を表示
+
+## 公式フィードの収集（v0.8）
+
+ニュース画面の「ニュースを取得」（`POST /api/fetch`）で、他の情報源と一緒に取得します（自動の定期実行はありません）。
+
+| 項目 | 内容 |
+| --- | --- |
+| 形式 | RSS 2.0（Atom などは `PARSERS` に解析関数を追加して対応できる構造） |
+| 取得件数 | 各情報源の最新50件以内（`FeedConfig.max_items`）。初回もそれより古い記事は取り込まない |
+| 重複防止 | 外部ID＝ guid → 元記事の URL → タイトルと公開日時のハッシュ。`(source, external_id)` の一意制約で、2回目以降は未登録の記事だけを追加 |
+| 条件付き取得 | 前回の `ETag`・`Last-Modified` を送り、304 なら何もしない。対応していないフィード（Shopify）でも外部IDで重複を防ぐ |
+| 最短間隔 | 前回の取得（成功・304）から60分以内は取得しない（`skipped`）。失敗時は取得日時を進めず、すぐ再試行できる |
+| 安全対策 | タイムアウト20秒、レスポンス5MBまで（受信しながら数えて超えたら中止）、DOCTYPE・ENTITY を含む XML は拒否、壊れた XML・HTTP エラーは `errors` に記録して既存の記事は残す |
+| 保存する項目 | タイトル、元記事の URL、公開日時、短い抜粋、公式カテゴリー、監視対象の市場（`metadata.platform`） |
+| 保存しない項目 | 本文（`content:encoded`・長い `description`）、投稿者名 |
+| 日時を解析できない記事 | 推測で補わず、除外して `errors` に記録する |
+
+収集した記事は「事実」（公式の告知と公式カテゴリー）として扱います。
+
+- v0.4 のキーワード判定（`python -m app.analyze`）で、観測の候補（`signal_type`）を付けられます。
+- 推測される事業機会や、需要仮説への自動の昇格は行いません。
+
+`sources` に追加した列（v8）は次のとおりです。
+
+- `fetch_etag`・`fetch_last_modified`：条件付き取得用
+- `last_fetched_at`：最後に成功（200・304）した日時
+- `last_fetch_status`：`ok` / `not_modified` / `skipped` / `error`
+- `last_fetch_error`：直近の失敗の内容
+
+情報源の定義の同期（起動時）は、これらの列に触れません。
 
 ## 事業機会の比較・選定・検証計画（v0.7）
 
@@ -446,6 +489,8 @@ cd backend
 - 収益性の評価：価格・金額・顧客獲得コスト（CAC）・顧客生涯価値（LTV）・解約率・市場規模の推計
   - v0.7 の6観点の評価と支払意思の記録が、その入り口になる
 - 事前予約のキャンセル・返金条件の記録、計画の日程管理・リマインダー、顧客の連絡先の管理（CRM）
+- 公式フィードの自動の定期取得、Atlassian などの情報源の追加（フィードの URL と利用条件の確認後）、Atom 形式の解析
+- 公式フィードの記事から、推測される事業機会を作る処理（事実と推測を分けて別の段階で設計する）
 - AI による仮説の生成・評価、事業性のスコアリングや順位付け
 - ニュース記事から仮説を作るルール（記事は人が根拠として紐付けることのみ可能）
 - 認証。書き込み用の API はローカルでの利用（CORS は localhost のみ）を前提としており、外部に公開する前に認証が必要
@@ -477,7 +522,7 @@ python3 -m venv .venv
 ```
 
 DBは初回起動時に `backend/data/radar.db` に作成されます（環境変数 `RADAR_DB_PATH` で変更可）。
-v0.1〜v0.6 のDBがある場合は、起動時に自動で最新のスキーマ（v7）へマイグレーションします（後述）。事前にバックアップしてください。
+v0.1〜v0.7 のDBがある場合は、起動時に自動で最新のスキーマ（v8）へマイグレーションします（後述）。事前にバックアップしてください。
 
 ### 2. フロントエンド（http://localhost:3000）
 
@@ -683,7 +728,7 @@ DB 側では、トリガーで次のことを強制しています。
 スキーマのバージョンは `PRAGMA user_version` で管理しています（`backend/app/db.py` の `MIGRATIONS`）。
 
 - v0.1 のDB（`user_version = 0`）は、起動時に v2、v3 の順に移行します。各段階は1トランザクションで適用されます。
-- v0.2 以降のDB は、未適用のバージョン（v3〜v7）を順に適用します。v5〜v7 は新しいテーブル（v7 は索引・トリガーも）を追加するだけで、既存のテーブルを作り直しません。
+- v0.2 以降のDB は、未適用のバージョン（v3〜v8）を順に適用します。v5〜v7 は新しいテーブル（v7 は索引・トリガーも）を、v8 は `sources` への列を追加するだけで、既存のテーブルを作り直しません。
 - **注意**：バックエンドの起動時（`uvicorn` や各 CLI の実行時）に、未適用のマイグレーションが自動で適用されます。既存の DB を最新のコードで初めて起動する前に、`backend/data/radar.db` をバックアップしてください。
 - いずれの場合も、既存の記事・取得日時・市場ラベル・ラベルは保持されます。
 - 既存記事の `language` は、情報源の定義から補完します。
@@ -726,6 +771,7 @@ backend/
       base.py        情報源インターフェース（RawArticle / FetchResult / Source）
       hackernews.py  Hacker News 取得処理
       egov_pcm.py    e-Govパブリック・コメント RSS 取得処理
+      feed.py        公式フィード（RSS 2.0）の汎用取得処理と、Shopify・freee の設定
   tests/             pytest
     data/            実データのテスト用ファイル（e-Stat の公式 xlsx を無加工で保存。出典は data/README.md）
 frontend/

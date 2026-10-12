@@ -626,6 +626,15 @@ MIGRATIONS: dict[int, str] = {
      AND OLD.id IN (SELECT hypothesis_id FROM current_opportunity_selections)
     BEGIN SELECT RAISE(ABORT, 'unselect the opportunity before rejecting'); END;
     """,
+    8: """
+    -- 公式フィードの取得状態（条件付き取得・最短間隔・直近の結果）。新しいテーブルは作らない
+    ALTER TABLE sources ADD COLUMN fetch_etag TEXT;
+    ALTER TABLE sources ADD COLUMN fetch_last_modified TEXT;
+    ALTER TABLE sources ADD COLUMN last_fetched_at TEXT;      -- 最後に取得に成功（200 または 304）した日時（UTC）
+    ALTER TABLE sources ADD COLUMN last_fetch_status TEXT
+        CHECK (last_fetch_status IN ('ok', 'not_modified', 'skipped', 'error'));
+    ALTER TABLE sources ADD COLUMN last_fetch_error TEXT;
+    """,
 }
 SCHEMA_VERSION = max(MIGRATIONS)
 
@@ -798,5 +807,27 @@ def list_sources() -> list[dict]:
     with connect() as conn:
         return [dict(row) for row in conn.execute(
             "SELECT id, label, country, kind, language, homepage, license, attribution,"
-            " terms_url, commercial_use, terms_checked_on FROM sources ORDER BY id"
+            " terms_url, commercial_use, terms_checked_on, last_fetched_at, last_fetch_status, last_fetch_error"
+            " FROM sources ORDER BY id"
         )]
+
+
+FETCH_STATE_COLUMNS = ("fetch_etag", "fetch_last_modified", "last_fetched_at", "last_fetch_status", "last_fetch_error")
+
+
+def get_fetch_state(source_name: str) -> dict:
+    """フィードの取得状態（前回の ETag・Last-Modified・取得日時など）。未取得なら値はすべて None。"""
+    with connect() as conn:
+        migrate(conn)
+        row = conn.execute(f"SELECT {', '.join(FETCH_STATE_COLUMNS)} FROM sources WHERE id = ?", (source_name,)).fetchone()
+    return dict(row) if row else dict.fromkeys(FETCH_STATE_COLUMNS)
+
+
+def update_fetch_state(source_name: str, state: dict) -> None:
+    """取得状態を更新する。state に含まれる列だけを書き換える（情報源の定義の同期とは独立）。"""
+    columns = [c for c in FETCH_STATE_COLUMNS if c in state]
+    if not columns:
+        return
+    with connect() as conn:
+        conn.execute(f"UPDATE sources SET {', '.join(f'{c} = ?' for c in columns)} WHERE id = ?",
+                     (*[state[c] for c in columns], source_name))

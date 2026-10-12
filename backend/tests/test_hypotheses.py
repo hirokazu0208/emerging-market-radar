@@ -405,7 +405,9 @@ def test_v5_db_migrates_to_v6_preserving_data(stats_db):
     path = stats_db / "test.db"
     conn = sqlite3.connect(path)
     conn.execute("PRAGMA user_version = 5")
-    # v6 以降のテーブル・ビューを削除して v5 の状態を再現する
+    # v6 以降のテーブル・ビュー・列を削除して v5 の状態を再現する
+    for c in ("fetch_etag", "fetch_last_modified", "last_fetched_at", "last_fetch_status", "last_fetch_error"):
+        conn.execute(f"ALTER TABLE sources DROP COLUMN {c}")  # v8 で追加した列
     conn.execute("DROP VIEW current_opportunity_selections")
     for t in ("opportunity_selections", "assessment_refs", "assessment_ref_policies", "opportunity_assessments",
               "activity_result_evidence", "validation_activity_sources", "validation_activity_results",

@@ -4,6 +4,9 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
+// 記事一覧の取得件数（バックエンドの上限）。指定しないと既定の100件となり、新しい情報源の記事が
+// 件数の多い情報源（Hacker News など）に押し出されて表示されないことがあるため、明示する
+const ARTICLE_LIMIT = 500;
 
 type Market = { market: string; method: string };
 
@@ -30,6 +33,7 @@ type Article = {
   language: string | null;
   markets: Market[];
   signals: SignalLabel[];
+  metadata: { feed_categories?: string[]; platform?: string } & Record<string, unknown>;
 };
 
 type Source = {
@@ -39,6 +43,18 @@ type Source = {
   homepage: string;
   license: string | null;
   attribution: string | null;
+  commercial_use: "allowed" | "restricted" | "unknown";
+  last_fetched_at: string | null;
+  last_fetch_status: "ok" | "not_modified" | "skipped" | "error" | null;
+  last_fetch_error: string | null;
+};
+
+const COMMERCIAL_USE_NAMES: Record<string, string> = { allowed: "可（条件あり）", restricted: "制限あり", unknown: "未確認" };
+const FETCH_STATUS_NAMES: Record<string, string> = {
+  ok: "取得済み",
+  not_modified: "更新なし（304）",
+  skipped: "最短間隔のため取得を見送り",
+  error: "取得に失敗",
 };
 
 type FetchResult = { fetched: number; inserted: number; errors: string[] };
@@ -120,12 +136,11 @@ export default function Home() {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams();
+      const params = new URLSearchParams({ limit: String(ARTICLE_LIMIT) });
       if (selectedCategory) params.set("category", selectedCategory);
       if (selectedMarket) params.set("market", selectedMarket);
       if (selectedSignal) params.set("signal", selectedSignal);
-      const query = params.toString() ? `?${params}` : "";
-      const res = await fetch(`${API_BASE}/api/articles${query}`);
+      const res = await fetch(`${API_BASE}/api/articles?${params}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: { articles: Article[] } = await res.json();
       setArticles(data.articles);
@@ -221,7 +236,12 @@ export default function Home() {
             ))}
           </select>
         </label>
-        {!loading && <span className="count">{articles.length} 件</span>}
+        {!loading && (
+          <span className="count">
+            {articles.length} 件
+            {articles.length >= ARTICLE_LIMIT && `（新しい順に上限${ARTICLE_LIMIT}件まで表示。古い記事は絞り込みで表示してください）`}
+          </span>
+        )}
       </div>
       {market === "overseas" && (
         <p className="hint">対象市場が未判定の記事（Hacker News など）は「すべて」にのみ表示されます。</p>
@@ -287,6 +307,16 @@ export default function Home() {
                 {a.title}
               </a>
               {a.summary && <p className="summary">{a.summary}</p>}
+              {a.metadata?.feed_categories && a.metadata.feed_categories.length > 0 && (
+                <div className="feed-categories" title="情報源（公式フィード）が付けた分類です">
+                  <span className="feed-categories-label">公式カテゴリー：</span>
+                  {a.metadata.feed_categories.map((c) => (
+                    <span key={c} className="tag">
+                      {c}
+                    </span>
+                  ))}
+                </div>
+              )}
               {a.signals.length > 0 && (
                 <div className="signals">
                   {a.signals.map((s) => (
@@ -334,13 +364,21 @@ export default function Home() {
                   {s.label}
                 </a>
                 （所在地：{s.country}
-                {s.license && `、利用条件：${s.license}`}）
+                {s.license && `、利用条件：${s.license}`}、商用利用：{COMMERCIAL_USE_NAMES[s.commercial_use] ?? s.commercial_use}）
                 {s.attribution && <div className="attribution">{s.attribution}</div>}
+                {s.last_fetch_status && (
+                  <div className={`attribution${s.last_fetch_status === "error" ? " warn-text" : ""}`}>
+                    直近の取得：{FETCH_STATUS_NAMES[s.last_fetch_status]}
+                    {s.last_fetched_at && `（最終取得 ${formatJst(s.last_fetched_at)}）`}
+                    {s.last_fetch_status === "error" && s.last_fetch_error && `：${s.last_fetch_error}`}
+                  </div>
+                )}
               </li>
             ))}
           </ul>
           <p className="attribution">
-            カテゴリーと対象市場は本アプリが自動で付与したもので、情報源による分類ではありません。
+            カテゴリーと対象市場は本アプリが自動で付与したもので、情報源による分類ではありません（「公式カテゴリー」は情報源が付けた分類です）。
+            公式フィードの記事は、タイトル・短い抜粋・公式カテゴリーのみを保存しています。本文は元記事を参照してください。
           </p>
         </footer>
       )}

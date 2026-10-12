@@ -353,11 +353,14 @@ async def fetch():
     errors: list[str] = []
     for source in SOURCES:
         try:
-            result = await source.fetch(FETCH_LIMIT)
+            # 情報源ごとの取得上限（公式フィードは FeedConfig.max_items）。無ければ共通の上限
+            result = await source.fetch(getattr(source, "fetch_limit", FETCH_LIMIT))
         except Exception as e:  # 1つの情報源の想定外エラーで全体を止めない
             errors.append(f"{source.label}: 予期しないエラー ({e})")
             continue
         errors.extend(result.errors)
+        if result.fetch_state:
+            db.update_fetch_state(source.name, result.fetch_state)
         fetched += len(result.articles)
         inserted += db.save_articles(
             source, [(a, a.category or classify(a.title)) for a in result.articles]

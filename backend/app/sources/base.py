@@ -6,7 +6,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 
 @dataclass
@@ -19,20 +19,23 @@ class RawArticle:
     published_at: datetime  # タイムゾーン付き
     summary: str | None = None  # 公開APIから取得できる場合のみ
     category: str | None = None  # 情報源側で分類が確定している場合のみ（未指定ならキーワード分類）
-    metadata: dict[str, str] = field(default_factory=dict)  # 情報源固有の項目（締切日など）
+    metadata: dict[str, Any] = field(default_factory=dict)  # 情報源固有の項目（締切日、公式カテゴリーなど）
 
 
 @dataclass
 class FetchResult:
     articles: list[RawArticle]
     errors: list[str]
+    # 取得状態（sources の fetch_etag・fetch_last_modified・last_fetched_at・last_fetch_status・last_fetch_error）。
+    # 状態を持たない情報源（Hacker News・e-Gov）は None
+    fetch_state: dict[str, Any] | None = None
 
 
 class Source(Protocol):
     name: str  # DBの source 列に保存される識別子（例: "hackernews"）
     label: str  # 画面表示用の名称（例: "Hacker News"）
     country: str  # 情報源の所在地（ISO 3166-1 alpha-2）。記事の対象市場とは別
-    kind: str  # 'tech_news' | 'press_release' | 'government' | 'policy'
+    kind: str  # 'tech_news' | 'press_release' | 'government' | 'policy' | 'platform_changelog'
     language: str  # 記事の言語（'en' / 'ja'）
     default_market: str | None  # 記事の対象市場の既定値。判断できない情報源は None（未判定）
     homepage: str
