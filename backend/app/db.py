@@ -151,6 +151,164 @@ MIGRATIONS: dict[int, str] = {
     );
     CREATE INDEX idx_problem_observations_problem ON problem_observations (problem_code);
     """,
+    6: """
+    -- SaaS需要仮説。観測（統計・記事）ではなく、人が検証するための作業単位
+    CREATE TABLE hypotheses (
+        id                INTEGER PRIMARY KEY,
+        domain            TEXT NOT NULL CHECK (domain IN
+                            ('marketing', 'sales', 'operations', 'finance', 'customer_success')),
+        title             TEXT NOT NULL CHECK (length(trim(title)) > 0),
+        target_customer   TEXT NOT NULL CHECK (length(trim(target_customer)) > 0),
+        problem_statement TEXT NOT NULL CHECK (length(trim(problem_statement)) > 0),
+        solution_idea     TEXT NOT NULL CHECK (length(trim(solution_idea)) > 0),
+        assumptions       TEXT NOT NULL CHECK (length(trim(assumptions)) > 0),   -- 前提条件（1行1項目）
+        unknowns          TEXT NOT NULL CHECK (length(trim(unknowns)) > 0),      -- 未確認事項（1行1項目）
+        not_implied       TEXT NOT NULL CHECK (length(trim(not_implied)) > 0),   -- この仮説が示さないこと
+        next_action       TEXT NOT NULL CHECK (length(trim(next_action)) > 0),   -- 次の検証行動
+        status            TEXT NOT NULL DEFAULT 'unverified'
+                            CHECK (status IN ('unverified', 'in_progress', 'rejected', 'validated')),
+        status_reason     TEXT,
+        origin            TEXT NOT NULL CHECK (origin IN ('rule', 'manual')),
+        rule_key          TEXT,             -- ルールの識別子（例：'p09.finance.food'）
+        rule_version      TEXT,             -- 作成・最終更新したルールセットの版
+        rule_retired      INTEGER NOT NULL DEFAULT 0 CHECK (rule_retired IN (0, 1)),
+        human_modified    INTEGER NOT NULL DEFAULT 0 CHECK (human_modified IN (0, 1)),
+        created_at        TEXT NOT NULL,
+        updated_at        TEXT NOT NULL,
+        CHECK ((origin = 'rule') = (rule_key IS NOT NULL AND rule_version IS NOT NULL))
+    );
+    CREATE UNIQUE INDEX ux_hypotheses_rule_key ON hypotheses (rule_key) WHERE origin = 'rule';
+
+    -- 仮説の根拠と検証記録。追記のみ（更新・削除しない）
+    CREATE TABLE hypothesis_evidence (
+        id               INTEGER PRIMARY KEY,
+        hypothesis_id    INTEGER NOT NULL REFERENCES hypotheses(id),
+        kind             TEXT NOT NULL CHECK (kind IN
+                           ('problem_observation', 'article', 'note',            -- 観測・メモ（検証には数えない）
+                            'interview', 'channel_test', 'payment_intent')),     -- 顧客接点による検証記録
+        role             TEXT NOT NULL CHECK (role IN ('basis', 'supporting', 'contradicting', 'validation')),
+        added_by         TEXT NOT NULL CHECK (added_by IN ('rule', 'manual')),
+        -- 統計の観測への参照（修正版の取り込みで観測が置き換わっても根拠を残すため、外部キーにしない）
+        stat_table_id    INTEGER,
+        industry_code    TEXT,
+        problem_code     TEXT,
+        -- 紐付けた時点の写し
+        snapshot_label   TEXT,
+        snapshot_value   REAL,
+        snapshot_symbol  TEXT,
+        snapshot_total   REAL,
+        source_title     TEXT,
+        source_url       TEXT,
+        source_period    TEXT,              -- 統計の調査年
+        source_sha256    TEXT,              -- 統計ファイルのハッシュ（同じ年の修正版を区別する）
+        rule_version     TEXT,              -- 紐付けたルールセットの版
+        article_id       INTEGER REFERENCES articles(id),
+        -- 検証記録
+        contact_ref      TEXT,              -- 匿名化した顧客接点の識別子（氏名・連絡先は入れない）
+        result           TEXT CHECK (result IN ('supports', 'refutes', 'inconclusive')),
+        occurred_on      TEXT,              -- 実施日（YYYY-MM-DD）
+        payment_signal   TEXT CHECK (payment_signal IN ('preorder', 'paid', 'signed_quote', 'letter_of_intent')),
+        method_note      TEXT,              -- 検証方法の補足
+        description      TEXT,              -- 観察内容・メモ
+        url              TEXT,
+        created_at       TEXT NOT NULL,     -- 根拠を記録した日時
+        CHECK ((kind = 'problem_observation') = (stat_table_id IS NOT NULL AND industry_code IS NOT NULL
+                                                 AND problem_code IS NOT NULL AND source_period IS NOT NULL)),
+        CHECK ((kind = 'article') = (article_id IS NOT NULL)),
+        CHECK (kind <> 'note' OR (added_by = 'manual' AND length(trim(ifnull(description, ''))) > 0)),
+        -- 検証記録：人が追加し、識別子・実施日・結果・観察内容が必須。role は validation のみ
+        CHECK ((kind IN ('interview', 'channel_test', 'payment_intent')) = (role = 'validation')),
+        CHECK (kind NOT IN ('interview', 'channel_test', 'payment_intent') OR (
+                 added_by = 'manual' AND result IS NOT NULL AND occurred_on IS NOT NULL
+                 AND length(trim(ifnull(description, ''))) > 0
+                 AND contact_ref IS NOT NULL AND length(contact_ref) BETWEEN 1 AND 32
+                 AND contact_ref NOT GLOB '*[^A-Za-z0-9_-]*')),
+        CHECK ((kind = 'payment_intent') = (payment_signal IS NOT NULL)),
+        CHECK (contact_ref IS NULL OR kind IN ('interview', 'channel_test', 'payment_intent'))
+    );
+    CREATE INDEX idx_hypothesis_evidence_hypothesis ON hypothesis_evidence (hypothesis_id);
+    CREATE INDEX idx_hypothesis_evidence_problem ON hypothesis_evidence (problem_code, industry_code);
+    -- ルールが紐付ける観測は、同じ統計ファイルの同じ観測につき1件
+    CREATE UNIQUE INDEX ux_hypothesis_evidence_rule_basis ON hypothesis_evidence
+        (hypothesis_id, stat_table_id, industry_code, problem_code, source_sha256)
+        WHERE kind = 'problem_observation' AND added_by = 'rule';
+
+    -- 根拠の取り消し（追記のみ）。取り消した根拠は検証の条件に数えない
+    CREATE TABLE hypothesis_evidence_retractions (
+        evidence_id INTEGER PRIMARY KEY REFERENCES hypothesis_evidence(id),
+        reason      TEXT NOT NULL CHECK (length(trim(reason)) > 0),
+        created_at  TEXT NOT NULL
+    );
+
+    -- 履歴（作成・編集・状態変更・ルールによる更新と見送り・根拠の追加と取り消し）
+    CREATE TABLE hypothesis_events (
+        id            INTEGER PRIMARY KEY,
+        hypothesis_id INTEGER NOT NULL REFERENCES hypotheses(id),
+        event         TEXT NOT NULL CHECK (event IN ('created', 'rule_updated', 'rule_update_skipped', 'rule_retired',
+                                                     'edited', 'status_changed', 'evidence_added', 'evidence_retracted',
+                                                     'basis_added')),
+        from_status   TEXT,
+        to_status     TEXT,
+        detail        TEXT,                -- JSON
+        created_at    TEXT NOT NULL
+    );
+    CREATE INDEX idx_hypothesis_events_hypothesis ON hypothesis_events (hypothesis_id);
+
+    -- 仮説はすべて「未検証」で作成する
+    CREATE TRIGGER trg_hypotheses_insert_unverified BEFORE INSERT ON hypotheses
+    WHEN NEW.status <> 'unverified' OR NEW.status_reason IS NOT NULL
+    BEGIN SELECT RAISE(ABORT, 'hypothesis must be created as unverified'); END;
+
+    -- 許可された状態遷移のみ
+    CREATE TRIGGER trg_hypotheses_status_transition BEFORE UPDATE OF status ON hypotheses
+    WHEN OLD.status <> NEW.status AND (OLD.status, NEW.status) NOT IN (
+        VALUES ('unverified', 'in_progress'), ('unverified', 'rejected'),
+               ('in_progress', 'validated'), ('in_progress', 'rejected'), ('in_progress', 'unverified'),
+               ('rejected', 'unverified'), ('validated', 'in_progress'))
+    BEGIN SELECT RAISE(ABORT, 'invalid status transition'); END;
+
+    -- 棄却・検証で支持、およびそこからの変更には、新しい理由が必要
+    CREATE TRIGGER trg_hypotheses_status_reason BEFORE UPDATE OF status ON hypotheses
+    WHEN OLD.status <> NEW.status
+     AND (NEW.status IN ('rejected', 'validated') OR OLD.status IN ('rejected', 'validated'))
+     AND (NEW.status_reason IS NULL OR length(trim(NEW.status_reason)) = 0
+          OR NEW.status_reason IS OLD.status_reason)
+    BEGIN SELECT RAISE(ABORT, 'status reason required'); END;
+
+    -- 「検証で支持」：別々の顧客接点からの支持記録が2件以上、または支払意思を示す支持記録が1件以上
+    CREATE TRIGGER trg_hypotheses_validated_requires_evidence BEFORE UPDATE OF status ON hypotheses
+    WHEN NEW.status = 'validated' AND OLD.status <> 'validated' AND NOT (
+        (SELECT COUNT(DISTINCT e.contact_ref) FROM hypothesis_evidence e
+          WHERE e.hypothesis_id = NEW.id AND e.role = 'validation' AND e.result = 'supports'
+            AND e.id NOT IN (SELECT evidence_id FROM hypothesis_evidence_retractions)) >= 2
+        OR EXISTS (SELECT 1 FROM hypothesis_evidence e
+          WHERE e.hypothesis_id = NEW.id AND e.kind = 'payment_intent' AND e.result = 'supports'
+            AND e.id NOT IN (SELECT evidence_id FROM hypothesis_evidence_retractions)))
+    BEGIN SELECT RAISE(ABORT, 'validation requirements not met'); END;
+
+    -- 根拠・検証記録は追記のみ（更新・削除で条件が崩れることを防ぐ）
+    CREATE TRIGGER trg_hypothesis_evidence_no_update BEFORE UPDATE ON hypothesis_evidence
+    BEGIN SELECT RAISE(ABORT, 'evidence is append-only'); END;
+    CREATE TRIGGER trg_hypothesis_evidence_no_delete BEFORE DELETE ON hypothesis_evidence
+    BEGIN SELECT RAISE(ABORT, 'evidence is append-only'); END;
+    CREATE TRIGGER trg_retractions_no_update BEFORE UPDATE ON hypothesis_evidence_retractions
+    BEGIN SELECT RAISE(ABORT, 'retractions are append-only'); END;
+    CREATE TRIGGER trg_retractions_no_delete BEFORE DELETE ON hypothesis_evidence_retractions
+    BEGIN SELECT RAISE(ABORT, 'retractions are append-only'); END;
+
+    -- 取り消しは、人が追加した根拠のみ。「検証で支持」の仮説の根拠は取り消せない（先に状態を戻す）
+    CREATE TRIGGER trg_retractions_guard BEFORE INSERT ON hypothesis_evidence_retractions
+    WHEN (SELECT added_by FROM hypothesis_evidence WHERE id = NEW.evidence_id) IS NOT 'manual'
+      OR (SELECT h.status FROM hypotheses h JOIN hypothesis_evidence e ON e.hypothesis_id = h.id
+           WHERE e.id = NEW.evidence_id) = 'validated'
+    BEGIN SELECT RAISE(ABORT, 'retraction not allowed'); END;
+
+    -- 仮説は削除しない（棄却で表す）
+    CREATE TRIGGER trg_hypotheses_no_delete BEFORE DELETE ON hypotheses
+    BEGIN SELECT RAISE(ABORT, 'hypotheses are not deleted; reject instead'); END;
+    CREATE TRIGGER trg_hypothesis_events_no_change BEFORE UPDATE ON hypothesis_events
+    BEGIN SELECT RAISE(ABORT, 'events are append-only'); END;
+    """,
 }
 SCHEMA_VERSION = max(MIGRATIONS)
 

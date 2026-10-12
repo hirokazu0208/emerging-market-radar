@@ -185,6 +185,9 @@ export default function Home() {
           <Link href="/problems" className="nav-link">
             業種別の経営課題 →
           </Link>
+          <Link href="/hypotheses" className="nav-link">
+            SaaS需要仮説 →
+          </Link>
           <button className="fetch-button" onClick={handleFetch} disabled={fetching}>
             {fetching ? "取得中…" : "ニュースを取得"}
           </button>

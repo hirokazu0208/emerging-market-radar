@@ -1,11 +1,18 @@
+import os
+import re
 from contextlib import asynccontextmanager
+from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import db
 from .classifier import CATEGORIES, classify
 from .labels import TAXONOMIES
+from . import hypotheses as hyp
 from . import problems as problem_stats
 from .sources import SOURCES
 
@@ -18,14 +25,29 @@ async def lifespan(app: FastAPI):
     yield
 
 
+# この API は認証が無く、ローカルでの利用（127.0.0.1 で起動）専用。外部に公開する前に認証が必要
+LOCAL_ORIGIN = re.compile(r"http://(localhost|127\.0\.0\.1)(:\d+)?")
+ALLOWED_HOSTS = [h.strip() for h in os.environ.get("RADAR_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h.strip()]
+
 app = FastAPI(title="Emerging Market Radar API", version="0.2.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     # ローカル開発用：Next.js がポート3000以外で起動した場合も許可する
-    allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
-    allow_methods=["GET", "POST"],
+    allow_origin_regex=LOCAL_ORIGIN.pattern,
+    allow_methods=["GET", "POST", "PATCH"],
     allow_headers=["*"],
 )
+# Host ヘッダーを localhost に限定する（DNS リバインディングで外部のページから読み書きされることを防ぐ）
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+
+
+@app.middleware("http")
+async def reject_foreign_origin_writes(request: Request, call_next):
+    """書き込み系のリクエストは、ローカルの画面（または Origin の無い CLI 等）からのみ受け付ける。"""
+    origin = request.headers.get("origin")
+    if request.method in ("POST", "PATCH", "PUT", "DELETE") and origin and not LOCAL_ORIGIN.fullmatch(origin):
+        return JSONResponse({"detail": "ローカル以外のオリジンからの書き込みは受け付けません"}, status_code=403)
+    return await call_next(request)
 
 
 @app.get("/api/health")
@@ -91,6 +113,119 @@ def problems(
     if result is None:
         raise HTTPException(status_code=404, detail=f"統計表がありません: {table_id}")
     return result
+
+
+# --- SaaS需要仮説 ----------------------------------------------------------------
+
+class HypothesisCreate(BaseModel):
+    domain: str
+    title: str
+    target_customer: str
+    problem_statement: str
+    solution_idea: str
+    assumptions: str
+    unknowns: str
+    not_implied: str
+    next_action: str
+
+
+class HypothesisPatch(BaseModel):
+    domain: str | None = None
+    title: str | None = None
+    target_customer: str | None = None
+    problem_statement: str | None = None
+    solution_idea: str | None = None
+    assumptions: str | None = None
+    unknowns: str | None = None
+    not_implied: str | None = None
+    next_action: str | None = None
+
+
+class StatusChange(BaseModel):
+    status: str
+    reason: str | None = None
+
+
+class EvidenceCreate(BaseModel):
+    kind: str
+    role: Literal["supporting", "contradicting"] | None = None
+    description: str | None = None
+    method_note: str | None = None
+    url: str | None = None
+    article_id: int | None = None
+    stat_table_id: int | None = None
+    industry_code: str | None = None
+    problem_code: str | None = None
+    contact_ref: str | None = None
+    result: str | None = None
+    occurred_on: str | None = None
+    payment_signal: str | None = None
+
+
+class Retraction(BaseModel):
+    reason: str
+
+
+def _hyp_call(fn, *args):
+    try:
+        return fn(*args)
+    except hyp.NotFound as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except hyp.InvalidRequest as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    except hyp.Conflict as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+
+
+@app.get("/api/hypotheses")
+def list_hypotheses(
+    domain: str | None = None,
+    status: str | None = None,
+    origin: str | None = None,
+    problem: str | None = None,
+    industry: str | None = None,
+):
+    """需要仮説の一覧。domain_counts は領域以外の条件で数えた5領域の件数（0件も含む）。"""
+    return _hyp_call(hyp.list_hypotheses, domain or None, status or None, origin or None, problem or None, industry or None)
+
+
+@app.get("/api/hypotheses/{hypothesis_id}")
+def get_hypothesis(hypothesis_id: int):
+    return _hyp_call(hyp.get_hypothesis, hypothesis_id)
+
+
+@app.post("/api/hypotheses", status_code=201)
+def create_hypothesis(body: HypothesisCreate):
+    return {"id": _hyp_call(hyp.create_manual, body.model_dump())}
+
+
+@app.patch("/api/hypotheses/{hypothesis_id}")
+def update_hypothesis(hypothesis_id: int, body: HypothesisPatch):
+    _hyp_call(hyp.update_hypothesis, hypothesis_id, body.model_dump(exclude_none=True))
+    return _hyp_call(hyp.get_hypothesis, hypothesis_id)
+
+
+@app.post("/api/hypotheses/{hypothesis_id}/status")
+def change_hypothesis_status(hypothesis_id: int, body: StatusChange):
+    _hyp_call(hyp.set_status, hypothesis_id, body.status, body.reason)
+    return _hyp_call(hyp.get_hypothesis, hypothesis_id)
+
+
+@app.post("/api/hypotheses/{hypothesis_id}/evidence", status_code=201)
+def add_hypothesis_evidence(hypothesis_id: int, body: EvidenceCreate):
+    return {"id": _hyp_call(hyp.add_evidence, hypothesis_id, body.model_dump(exclude_none=True))}
+
+
+@app.post("/api/hypotheses/{hypothesis_id}/evidence/{evidence_id}/retract")
+def retract_hypothesis_evidence(hypothesis_id: int, evidence_id: int, body: Retraction):
+    _hyp_call(hyp.retract_evidence, hypothesis_id, evidence_id, body.reason)
+    return _hyp_call(hyp.get_hypothesis, hypothesis_id)
+
+
+@app.get("/api/hypothesis-rules")
+def hypothesis_rules():
+    """仮説を作るルールの一覧と、仮説を作らない経営課題とその理由。"""
+    return hyp.rules_overview()
 
 
 @app.post("/api/fetch")

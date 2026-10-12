@@ -481,3 +481,127 @@ h1 {
 .notes li {
   margin-bottom: 4px;
 }
+
+/* --- SaaS需要仮説（/hypotheses） --- */
+.domain-tabs {
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.status {
+  border-radius: 4px;
+  padding: 0 8px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+}
+
+.status-in_progress {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.status-validated {
+  background: var(--notice-bg);
+}
+
+.status-rejected {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.hypothesis .title {
+  display: block;
+  margin: 2px 0 4px;
+}
+
+.basis-link {
+  font-size: 0.75rem;
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  text-decoration: none;
+}
+
+.th-link {
+  color: var(--accent);
+}
+
+.detail {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.detail h3 {
+  margin: 0 0 6px;
+  font-size: 0.95rem;
+}
+
+.detail h4 {
+  margin: 8px 0;
+  font-size: 0.85rem;
+}
+
+.field-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.8rem;
+  margin-bottom: 8px;
+  color: var(--muted);
+}
+
+.field,
+.field-inline {
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 6px;
+}
+
+.field {
+  width: 100%;
+  min-height: 3.2em;
+  resize: vertical;
+}
+
+.evidence-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 0.82rem;
+}
+
+.evidence-list li {
+  border-left: 3px solid var(--border);
+  padding-left: 8px;
+}
+
+.evidence-list li.retracted {
+  opacity: 0.6;
+}
+
+.evidence-form {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+.warn-text {
+  color: var(--error-text);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

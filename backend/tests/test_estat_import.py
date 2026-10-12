@@ -352,7 +352,7 @@ def test_v4_db_migrates_to_v5_preserving_news_data(tmp_path, monkeypatch):
     db.init_db(SOURCES)
 
     conn = sqlite3.connect(path)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
     assert {t: conn.execute(f"SELECT * FROM {t}").fetchall() for t in tables} == before
     assert conn.execute("SELECT COUNT(*) FROM stat_tables").fetchone()[0] == 0
     with pytest.raises(sqlite3.IntegrityError):  # 値と記号はどちらか一方だけ

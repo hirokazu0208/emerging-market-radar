@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 
@@ -82,12 +83,23 @@ function shareOf(ind: Industry, key: SortKey): number | null {
 }
 
 export default function ProblemsPage() {
+  // useSearchParams を使うため、Suspense の境界で囲む（Next.js の推奨）
+  return (
+    <Suspense fallback={<p className="empty">読み込み中…</p>}>
+      <ProblemsContent />
+    </Suspense>
+  );
+}
+
+function ProblemsContent() {
+  // 仮説の根拠などから ?industry=42&problem=09 で開けるようにする
+  const params = useSearchParams();
   const [tables, setTables] = useState<StatTable[] | null>(null);
   const [tableId, setTableId] = useState<number | null>(null);
   const [data, setData] = useState<ProblemsResponse | null>(null);
-  const [industry, setIndustry] = useState("");
-  const [problem, setProblem] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("order");
+  const [industry, setIndustry] = useState(params.get("industry") ?? "");
+  const [problem, setProblem] = useState(params.get("problem") ?? "");
+  const [sortKey, setSortKey] = useState<SortKey>(params.get("problem") || "order");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   // 業種の選択肢は、絞り込みに関係なく表の全業種から作る
@@ -118,7 +130,6 @@ export default function ProblemsPage() {
       const json: ProblemsResponse = await res.json();
       if (signal.aborted) return;
       setData(json);
-      if (!selectedIndustry) setAllIndustries(json.industries);
     } catch (e) {
       if (signal.aborted) return; // 新しい条件で取得し直しているため、古い結果・エラーは反映しない
       setData(null);
@@ -128,6 +139,19 @@ export default function ProblemsPage() {
     }
   }, []);
 
+  // 業種の選択肢は、業種で絞り込まない一覧から作る（?industry= で開いた場合も全業種を選べるように）
+  useEffect(() => {
+    if (tableId === null) return;
+    const controller = new AbortController();
+    fetch(`${API_BASE}/api/problems?table_id=${tableId}`, { signal: controller.signal })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+      .then((json: ProblemsResponse) => setAllIndustries(json.industries))
+      .catch(() => {
+        if (!controller.signal.aborted) setAllIndustries([]);
+      });
+    return () => controller.abort();
+  }, [tableId]);
+
   useEffect(() => {
     if (tableId === null) return;
     const controller = new AbortController();
@@ -136,14 +160,18 @@ export default function ProblemsPage() {
     return () => controller.abort();
   }, [tableId, industry, load]);
 
+  const problems = data?.problems ?? [];
+  // URL などで存在しない課題コードが指定された場合は、絞り込み・並べ替えに使わない
+  const validProblem = problems.some((p) => p.code === problem) ? problem : "";
+  const effectiveSort = sortKey === "unlisted" || problems.some((p) => p.code === sortKey) ? sortKey : "order";
+
   const rows = useMemo(() => {
     const list = [...(data?.industries ?? [])];
-    if (sortKey === "order") return list;
-    return list.sort((a, b) => (shareOf(b, sortKey) ?? -1) - (shareOf(a, sortKey) ?? -1));
-  }, [data, sortKey]);
+    if (effectiveSort === "order") return list;
+    return list.sort((a, b) => (shareOf(b, effectiveSort) ?? -1) - (shareOf(a, effectiveSort) ?? -1));
+  }, [data, effectiveSort]);
 
-  const problems = data?.problems ?? [];
-  const shownProblems = problem ? problems.filter((p) => p.code === problem) : problems;
+  const shownProblems = validProblem ? problems.filter((p) => p.code === validProblem) : problems;
   const table = data?.table ?? null;
 
   function selectTable(id: number) {
@@ -166,9 +194,14 @@ export default function ProblemsPage() {
           <h1>業種別の経営課題</h1>
           <p className="subtitle">公的統計に記載された経営課題（第2層の分析に向けた土台）</p>
         </div>
-        <Link href="/" className="nav-link">
-          ← ニュース一覧へ
-        </Link>
+        <div className="header-actions">
+          <Link href="/hypotheses" className="nav-link">
+            SaaS需要仮説 →
+          </Link>
+          <Link href="/" className="nav-link">
+            ← ニュース一覧へ
+          </Link>
+        </div>
       </header>
 
       <div className="caution">
@@ -203,7 +236,7 @@ export default function ProblemsPage() {
           </label>
           <label>
             経営課題：
-            <select value={problem} onChange={(e) => selectProblem(e.target.value)}>
+            <select value={validProblem} onChange={(e) => selectProblem(e.target.value)}>
               <option value="">すべて</option>
               {problems.map((p) => (
                 <option key={p.code} value={p.code}>
@@ -214,7 +247,7 @@ export default function ProblemsPage() {
           </label>
           <label>
             並べ替え：
-            <select value={sortKey} onChange={(e) => setSortKey(e.target.value)}>
+            <select value={effectiveSort} onChange={(e) => setSortKey(e.target.value)}>
               <option value="order">表の順序（業種の階層）</option>
               {shownProblems.map((p) => (
                 <option key={p.code} value={p.code}>
@@ -249,17 +282,20 @@ export default function ProblemsPage() {
                   {shownProblems.map((p) => (
                     <th key={p.code}>
                       <button
-                        className={`th-sort${sortKey === p.code ? " active" : ""}`}
+                        className={`th-sort${effectiveSort === p.code ? " active" : ""}`}
                         onClick={() => setSortKey(p.code)}
                         title="業種内割合が高い順に並べ替え"
                       >
                         {p.name}
                       </button>
+                      <Link href={`/hypotheses?problem=${p.code}`} className="th-sub th-link" title="この経営課題を出発点とする需要仮説">
+                        仮説を見る
+                      </Link>
                     </th>
                   ))}
                   <th>
                     <button
-                      className={`th-sort${sortKey === "unlisted" ? " active" : ""}`}
+                      className={`th-sort${effectiveSort === "unlisted" ? " active" : ""}`}
                       onClick={() => setSortKey("unlisted")}
                     >
                       表に掲載のない回答（内訳未確認）
