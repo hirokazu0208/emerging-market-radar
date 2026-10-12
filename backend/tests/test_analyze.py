@@ -191,7 +191,7 @@ def test_v3_db_migrates_to_v4_preserving_labels(tmp_path, monkeypatch):
     db.init_db(SOURCES)
 
     conn = sqlite3.connect(path)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
     assert conn.execute(
         "SELECT article_id, label, method, evidence, strength, rule_version FROM article_labels"
     ).fetchall() == [(1, "funding", "manual", "人手", None, None)]

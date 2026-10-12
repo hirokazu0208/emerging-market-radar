@@ -332,3 +332,152 @@ h1 {
 .evidence-text {
   overflow-wrap: anywhere;
 }
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.nav-link {
+  color: var(--accent);
+  font-size: 0.9rem;
+  text-decoration: none;
+}
+
+.nav-link:hover {
+  text-decoration: underline;
+}
+
+/* --- 業種別の経営課題（/problems） --- */
+.container.wide {
+  max-width: 1200px;
+}
+
+.caution {
+  margin: 16px 0 0;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 0.85rem;
+}
+
+.table-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.problems-table {
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  min-width: 100%;
+}
+
+.problems-table th,
+.problems-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 6px 8px;
+  vertical-align: top;
+}
+
+.problems-table thead th {
+  background: var(--bg);
+  font-weight: 600;
+  text-align: center;
+  min-width: 84px;
+  position: sticky;
+  top: 0;
+}
+
+.problems-table .sticky-col {
+  position: sticky;
+  left: 0;
+  background: var(--surface);
+  text-align: left;
+  min-width: 220px;
+  z-index: 1;
+}
+
+.problems-table thead .sticky-col {
+  background: var(--bg);
+  z-index: 2;
+}
+
+.problems-table tr.level-1 .industry-cell,
+.problems-table tr.level-2 .industry-cell {
+  font-weight: 600;
+}
+
+.problems-table .industry-cell {
+  font-weight: 400;
+}
+
+.th-sort {
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
+.th-sort.active {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.th-sub {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.share {
+  display: block;
+  font-weight: 600;
+}
+
+.cell-sub {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.tags {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 6px;
+}
+
+.tag {
+  font-size: 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.tag-warn {
+  border-color: var(--error-text);
+  color: var(--error-text);
+}
+
+.notes ul {
+  padding-left: 20px;
+}
+
+.notes li {
+  margin-bottom: 4px;
+}

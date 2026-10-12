@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import db
 from .classifier import CATEGORIES, classify
 from .labels import TAXONOMIES
+from . import problems as problem_stats
 from .sources import SOURCES
 
 FETCH_LIMIT = 30
@@ -59,6 +60,37 @@ def articles(
 def signal_types():
     """市場形成シグナル（signal_type）のラベル一覧。"""
     return {"signal_types": list(TAXONOMIES["signal_type"][1])}
+
+
+@app.get("/api/problem-tables")
+def problem_tables():
+    """取り込み済みの統計表（出典・調査対象・加工内容・注意事項を含む）。"""
+    return {"tables": problem_stats.list_tables()}
+
+
+@app.get("/api/problems")
+def problems(
+    table_id: int | None = None,
+    industry: str | None = None,
+    problem: str | None = None,
+):
+    """業種別の経営課題。元データの値（value：‰）と、本アプリの算出値（computed_*）を分けて返す。
+
+    table_id を省略すると、最新の調査年の表を返す。
+    """
+    industry, problem = industry or None, problem or None  # 空文字は「指定なし」
+    if table_id is None:
+        tables = problem_stats.list_tables()
+        if not tables:
+            return {"table": None, "problems": [], "industries": []}
+        table_id = tables[0]["id"]
+    try:
+        result = problem_stats.get_problems(table_id, industry=industry, problem=problem)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"統計表がありません: {table_id}")
+    return result
 
 
 @app.post("/api/fetch")

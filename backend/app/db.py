@@ -110,6 +110,47 @@ MIGRATIONS: dict[int, str] = {
     ALTER TABLE article_labels ADD COLUMN strength TEXT CHECK (strength IN ('explicit', 'inferred'));
     ALTER TABLE article_labels ADD COLUMN rule_version TEXT;
     """,
+    5: """
+    -- 取り込んだ統計表（出典と取り込みの単位）。ニュース記事とは別に管理する
+    CREATE TABLE stat_tables (
+        id           INTEGER PRIMARY KEY,
+        source       TEXT NOT NULL,              -- 'estat'
+        stat_code    TEXT NOT NULL,              -- 政府統計コード（例：'00200541'）
+        table_ref    TEXT NOT NULL,              -- 'statInfId:000040413728' など
+        table_no     TEXT NOT NULL,              -- 表番号（例：'14'）
+        title        TEXT NOT NULL,              -- 表題の原文
+        survey_name  TEXT NOT NULL,              -- 例：'2025年（令和7年） 個人企業経済調査'
+        period       TEXT NOT NULL,              -- 調査年（例：'2025'）
+        publisher    TEXT NOT NULL,              -- 作成機関
+        source_url   TEXT NOT NULL,
+        unit         TEXT NOT NULL,              -- 元データの単位（例：'‰'）
+        answer_type  TEXT NOT NULL CHECK (answer_type IN ('single', 'multiple', 'unknown')),
+        note         TEXT,                       -- 表の注記の原文
+        scope_note   TEXT NOT NULL,              -- 調査対象の範囲と代表性の注意
+        file_sha256  TEXT NOT NULL,              -- 取り込んだファイルのハッシュ（重複取り込みの判定）
+        imported_at  TEXT NOT NULL,
+        UNIQUE (source, table_ref, period)
+    );
+
+    -- 統計上の経営課題（表に書かれた値そのもの）。ソフトウェア需要ではない
+    CREATE TABLE problem_observations (
+        stat_table_id  INTEGER NOT NULL REFERENCES stat_tables(id) ON DELETE CASCADE,
+        area_code      TEXT NOT NULL,            -- '00'（全国）
+        industry_code  TEXT NOT NULL,            -- 例：'11'
+        industry_name  TEXT NOT NULL,            -- 原文（「うち〜」を含む）
+        industry_level INTEGER NOT NULL,         -- 表の階層レベル（1：全産業 〜 4）
+        parent_code    TEXT,                     -- 表の階層から決めた親業種
+        is_subset      INTEGER NOT NULL CHECK (is_subset IN (0, 1)),  -- 1：「うち〜」（親の一部の内訳で、網羅的でない）
+        row_order      INTEGER NOT NULL,         -- 表での行の順序
+        problem_code   TEXT NOT NULL,            -- '00'（総数）〜 '12'
+        problem_name   TEXT NOT NULL,
+        value          REAL,                     -- 元データの値（unit の単位）。記号のセルは NULL
+        value_symbol   TEXT,                     -- 記号の原文（'-' など）。数値のセルは NULL
+        CHECK ((value IS NULL) <> (value_symbol IS NULL)),
+        PRIMARY KEY (stat_table_id, area_code, industry_code, problem_code)
+    );
+    CREATE INDEX idx_problem_observations_problem ON problem_observations (problem_code);
+    """,
 }
 SCHEMA_VERSION = max(MIGRATIONS)
 

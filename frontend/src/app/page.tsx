@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
@@ -180,9 +181,14 @@ export default function Home() {
           <h1>Emerging Market Radar</h1>
           <p className="subtitle">公開ニュースから新しい市場・産業の兆候を探す</p>
         </div>
-        <button className="fetch-button" onClick={handleFetch} disabled={fetching}>
-          {fetching ? "取得中…" : "ニュースを取得"}
-        </button>
+        <div className="header-actions">
+          <Link href="/problems" className="nav-link">
+            業種別の経営課題 →
+          </Link>
+          <button className="fetch-button" onClick={handleFetch} disabled={fetching}>
+            {fetching ? "取得中…" : "ニュースを取得"}
+          </button>
+        </div>
       </header>
 
       <div className="toolbar">
